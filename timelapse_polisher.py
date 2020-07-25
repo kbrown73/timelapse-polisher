@@ -9,12 +9,12 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("files", help = "List of files", type = str, nargs = '+')
-    parser.add_argument("-d", "--downscale", type = int)
-    parser.add_argument("-do", "--downscale-output", type = int)
-    parser.add_argument("-b", "--blur", type = float)
-    parser.add_argument("-pi", "--preview-in", nargs = '?')
-    parser.add_argument("-p", "--preview-lum", nargs = '?')
+    parser.add_argument("files", type = str, nargs = '+', help = "List of files e.g: *.jpg")
+    parser.add_argument("-d", "--downscale", type = int, help = "Downscale input image by this factor before measuring luminances. Default = 8.")
+    parser.add_argument("-b", "--blur", type = float, help = "Gaussian blur the luminance map by this factor. Default = 20.")
+    parser.add_argument("-do", "--downscale-output", type = int, help = "Downscale the output images by this factor. Default = 1.")
+    parser.add_argument("-pi", "--preview-in", action = 'store_true', help = "Preview the first input image (half size) and exit.")
+    parser.add_argument("-pl", "--preview-lum", action = 'store_true', help = "Preview the first luminance map and exit.")
     args = parser.parse_args()
 
     if len(args.files) < 5:
@@ -28,34 +28,33 @@ def main():
     downscale = 8
     downscale_output = 1
     blur = 20.0
-    preview_in = False
-    preview_lum = False
-    if(args.downscale):
+    preview_in = args.preview_in
+    preview_lum = args.preview_lum
+
+    if(args.downscale != None):
         downscale = args.downscale
-    if(args.downscale_output):
+    if(args.downscale_output != None):
         downscale_output = args.downscale_output
-    if(args.blur):
+    if(args.blur != None):
         blur = args.blur
-    if(args.preview_lum):
-        preview_lum = True
-    if(args.preview_in):
-        preview_in = True
 
     nlum = np.zeros((height // downscale, width // downscale, len(args.files)))
 
     for n, file in enumerate(args.files):
         print("Reading: %s" % file)
         im = Image.open(file)
+        if(preview_in):
+            im = im.resize((width // 2, height // 2))
+            im.show()
+            return
+
         im = im.convert('F')
         print("    Downscaling: %dx" % downscale)
         im = im.resize((width // downscale, height // downscale))
 
-        if(preview_in):
-            im.show()
-            return
 
         nim = np.asarray(im) / 255.0
-        if(blur >= 0.0):
+        if(blur > 0.0):
             print("    Blurring: sigma = %f" % blur)
             nim = gaussian_filter(nim, sigma = blur)
 
