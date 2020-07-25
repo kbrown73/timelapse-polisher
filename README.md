@@ -3,6 +3,8 @@ Temporal and spatial luminance smoothing over image sequence.
 
 Timelapse Polisher analyses the luminance changes of an image sequence both spatially and temporally, smoothes those changes using Savitzky–Golay filter and then applies corrections to make the changes appear smooth over time. While the script is capable of doing all this pixel by pixel, experiments have shown it is usually best to do the analysing and smoothing on a down scaled and blurred version of the input images. Otherwise you would be correcting for noise and high frequency movements etc.
 
+Here is an example before/after comparison: https://youtu.be/Wwqp80QfCsk
+
 ```
 usage: timelapse_polisher.py [-h] [-d DOWNSCALE] [-b BLUR]
                              [-do DOWNSCALE_OUTPUT] [-pi] [-pl]
