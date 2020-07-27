@@ -6,6 +6,60 @@ import numpy as np
 import scipy.signal
 from scipy.ndimage.filters import gaussian_filter
 import argparse
+from multiprocessing import Pool, cpu_count
+from functools import partial
+
+def read_luma(width, height, downscale, blur, files):
+    n = files[0]
+    file = files[1]
+
+    print("Reading: %s" % file)
+    im = Image.open(file)
+    im = im.convert('F')
+
+    if(downscale > 1):
+        im = im.resize((width // downscale, height // downscale))
+
+    nim = np.asarray(im) / 255.0
+    if(blur > 0.0):
+        nim = gaussian_filter(nim, sigma = blur)
+
+    return nim
+
+def post_process(width, height, downscale_output, nflum, files):
+    n = files[0]
+    file = files[1]
+
+    print("Post processing: %s" % file)
+    im = Image.open(file)
+    if(downscale_output > 1):
+        width = width // downscale_output
+        height = height // downscale_output
+        im = im.resize((width, height))
+
+    tokens = file.split('.')
+    tokens[-2] += '_df'
+    tokens[-1] = 'jpg'
+    out_file = '.'.join(tokens)
+
+    nfl = nflum[:, :, n]
+    imfl = Image.fromarray(nfl)
+    imfl = imfl.resize((width, height))
+    nfl = np.asarray(imfl)
+
+    im_r, im_g, im_b = im.split()
+    nim_r = np.asarray(im_r)
+    nim_g = np.asarray(im_g)
+    nim_b = np.asarray(im_b)
+    nim_r = np.multiply(nim_r, nfl)
+    nim_g = np.multiply(nim_g, nfl)
+    nim_b = np.multiply(nim_b, nfl)
+    im_r = Image.fromarray(nim_r, 'F').convert('L')
+    im_g = Image.fromarray(nim_g, 'F').convert('L')
+    im_b = Image.fromarray(nim_b, 'F').convert('L')
+    im_output = Image.merge('RGB', (im_r, im_g, im_b))
+
+    im_output.save(out_file, quality = 100)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -38,32 +92,15 @@ def main():
     if(args.blur != None):
         blur = args.blur
 
-    nlum = np.zeros((height // downscale, width // downscale, len(args.files)))
+    pool = Pool(cpu_count())
+    func = partial(read_luma, width, height, downscale, blur)
+    ret = pool.map(func, enumerate(args.files))
+    pool.close()
+    pool.join()
 
-    for n, file in enumerate(args.files):
-        print("Reading: %s" % file)
-        im = Image.open(file)
-        if(preview_in):
-            im = im.resize((width // 2, height // 2))
-            im.show()
-            return
-
-        im = im.convert('F')
-        print("    Downscaling: %dx" % downscale)
-        im = im.resize((width // downscale, height // downscale))
-
-
-        nim = np.asarray(im) / 255.0
-        if(blur > 0.0):
-            print("    Blurring: sigma = %f" % blur)
-            nim = gaussian_filter(nim, sigma = blur)
-
-        if(preview_lum):
-            im = Image.fromarray(nim * 255.0)
-            im.show()
-            return
-
-        nlum[:, :, n] = nim
+    nlum = np.array(ret)
+    nlum = np.swapaxes(nlum, 0, 2)
+    nlum = np.swapaxes(nlum, 0, 1)
 
     wl = min(51, len(args.files))
     if wl % 2 == 0:
@@ -73,47 +110,11 @@ def main():
     nflum = scipy.signal.savgol_filter(nlum, wl, 3)
     nflum = np.divide(nflum, nlum, out = np.zeros_like(nflum), where = nlum!=0)
 
-    out_width = width
-    out_height = height
-    if(downscale_output > 1):
-        out_width = width // downscale_output
-        out_height = height // downscale_output
-
-    for n, file in enumerate(args.files):
-        print("Post processing: %s" % file)
-        im = Image.open(file)
-        if(downscale_output > 1):
-            print("    Downscaling: %dx" % downscale_output)
-            im = im.resize((out_width, out_height))
-
-        tokens = file.split('.')
-        tokens[-2] += '_df'
-        tokens[-1] = 'jpg'
-        out_file = '.'.join(tokens)
-
-        print("    Applying correction...")
-        nfl = nflum[:, :, n]
-        imfl = Image.fromarray(nfl)
-        if(downscale_output > 1):
-            imfl = imfl.resize((out_width, out_height))
-        else:
-            imfl = imfl.resize((width, height))
-        nfl = np.asarray(imfl)
-
-        im_r, im_g, im_b = im.split()
-        nim_r = np.asarray(im_r)
-        nim_g = np.asarray(im_g)
-        nim_b = np.asarray(im_b)
-        nim_r = np.multiply(nim_r, nfl)
-        nim_g = np.multiply(nim_g, nfl)
-        nim_b = np.multiply(nim_b, nfl)
-        im_r = Image.fromarray(nim_r, 'F').convert('L')
-        im_g = Image.fromarray(nim_g, 'F').convert('L')
-        im_b = Image.fromarray(nim_b, 'F').convert('L')
-        im_output = Image.merge('RGB', (im_r, im_g, im_b))
-
-        print("    Saving: %s" % out_file)
-        im_output.save(out_file, quality = 100)
+    pool = Pool(cpu_count())
+    func = partial(post_process, width, height, downscale_output, nflum)
+    pool.map(func, enumerate(args.files))
+    pool.close()
+    pool.join()
 
 if __name__ == '__main__':
     main()
