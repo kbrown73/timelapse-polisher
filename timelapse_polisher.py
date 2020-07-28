@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
-import os
-import argparse
+import os, argparse, shutil
 from functools import partial
 from multiprocessing import Pool, cpu_count
 from PIL import Image
@@ -26,22 +25,23 @@ def read_luma(width, height, downscale, blur, files):
 
     return nim
 
-def post_process(width, height, downscale_output, nflum, files):
+def post_process(width, height, downscale_output, nflum, out_path, files):
     n = files[0]
     file = files[1]
 
-    print("Post processing: %s" % file)
     im = Image.open(file)
     if(downscale_output > 1):
         width = width // downscale_output
         height = height // downscale_output
         im = im.resize((width, height))
 
+    file = os.path.basename(file)
     tokens = file.split('.')
     tokens[-2] += '_df'
-    # tokens[-1] = 'jpg'
     out_file = '.'.join(tokens)
+    out_file = os.path.join(out_path, out_file)
 
+    print("Post processing: %s" % out_file)
     nfl = nflum[:, :, n]
     imfl = Image.fromarray(nfl)
     imfl = imfl.resize((width, height))
@@ -71,6 +71,8 @@ def main():
     parser.add_argument("-do", "--downscale-output", type = int, help = "Downscale the output images by this factor. Default = 1.")
     parser.add_argument("-pi", "--preview-in", action = 'store_true', help = "Preview the first input image (half size) and exit.")
     parser.add_argument("-pl", "--preview-lum", action = 'store_true', help = "Preview the first luminance map and exit.")
+    parser.add_argument("-of", "--out-folder", type = str, help = "Name of the output folder to be created under current working path. Default = \'df\'")
+    parser.add_argument("-f", "--force", action = 'store_true', help = "With this flag the output folder will be deleted if it exists and a new one will be created.")
     args = parser.parse_args()
 
     if len(args.files) < 5:
@@ -117,6 +119,25 @@ def main():
         im.show()
         return
 
+    folder = 'df'
+    if(args.out_folder != None):
+        folder = args.out_folder
+    out_path = os.path.join(os.getcwd(), folder)
+
+    if os.path.isfile(out_path):
+        raise RuntimeError("Cannot create output folder as there is a name conflict with a file of same name.")
+
+    if os.path.isdir(out_path) and not args.force:
+        raise RuntimeError("Cannot create output folder as it already exists and -f flag was not used.")
+
+    if os.path.isdir(out_path) and args.force:
+        shutil.rmtree(out_path, ignore_errors = True)
+
+    try:
+        os.mkdir(out_path)
+    except:
+        raise RuntimeError("Could not create output path: %s" % out_path)
+
     pool = Pool(cpu_count())
     func = partial(read_luma, width, height, downscale, blur)
     ret = pool.map(func, enumerate(args.files))
@@ -132,7 +153,7 @@ def main():
     nflum = np.divide(nflum, nlum, out = np.zeros_like(nflum), where = nlum!=0)
 
     pool = Pool(cpu_count())
-    func = partial(post_process, width, height, downscale_output, nflum)
+    func = partial(post_process, width, height, downscale_output, nflum, out_path)
     pool.map(func, enumerate(args.files))
     pool.close()
     pool.join()
