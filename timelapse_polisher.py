@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import os
+import argparse
+from functools import partial
+from multiprocessing import Pool, cpu_count
 from PIL import Image
 import numpy as np
 import scipy.signal
 from scipy.ndimage.filters import gaussian_filter
-import argparse
-from multiprocessing import Pool, cpu_count
-from functools import partial
 
 def read_luma(width, height, downscale, blur, files):
     n = files[0]
@@ -66,6 +66,8 @@ def main():
     parser.add_argument("files", type = str, nargs = '+', help = "List of files e.g: *.jpg")
     parser.add_argument("-d", "--downscale", type = int, help = "Downscale input image by this factor before measuring luminances. Default = 8.")
     parser.add_argument("-b", "--blur", type = float, help = "Gaussian blur the luminance map by this factor. Default = 20.")
+    parser.add_argument("-wl", "--window-length", type = int, help = "Window length for Savitzky-Golay filter. Default = 51 or number of input files whichever is smaller. This will be rounded down to nearest odd number.")
+    parser.add_argument("-po", "--poly-order", type = int, help = "Polynomial order for Savitzky-Golay filter. Default = 3. Must be less than window length.")
     parser.add_argument("-do", "--downscale-output", type = int, help = "Downscale the output images by this factor. Default = 1.")
     parser.add_argument("-pi", "--preview-in", action = 'store_true', help = "Preview the first input image (half size) and exit.")
     parser.add_argument("-pl", "--preview-lum", action = 'store_true', help = "Preview the first luminance map and exit.")
@@ -84,6 +86,8 @@ def main():
     blur = 20.0
     preview_in = args.preview_in
     preview_lum = args.preview_lum
+    wl = min(51, len(args.files))
+    po = 3
 
     if(args.downscale != None):
         downscale = args.downscale
@@ -91,6 +95,16 @@ def main():
         downscale_output = args.downscale_output
     if(args.blur != None):
         blur = args.blur
+
+    if(args.window_length != None):
+        wl = args.window_length
+    if wl % 2 == 0:
+        wl -= 1
+
+    if(args.poly_order  != None):
+        if(args.poly_order >= wl):
+            raise RuntimeError("poly-order must be less than window length.")
+        po = args.poly_order
 
     pool = Pool(cpu_count())
     func = partial(read_luma, width, height, downscale, blur)
@@ -102,12 +116,8 @@ def main():
     nlum = np.swapaxes(nlum, 0, 2)
     nlum = np.swapaxes(nlum, 0, 1)
 
-    wl = min(51, len(args.files))
-    if wl % 2 == 0:
-        wl -= 1
-
-    print("Applying Savitzky-Golay filter...")
-    nflum = scipy.signal.savgol_filter(nlum, wl, 3)
+    print("Applying Savitzky-Golay filter. Window length = %d" % wl)
+    nflum = scipy.signal.savgol_filter(nlum, wl, po)
     nflum = np.divide(nflum, nlum, out = np.zeros_like(nflum), where = nlum!=0)
 
     pool = Pool(cpu_count())
