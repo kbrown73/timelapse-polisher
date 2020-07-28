@@ -39,7 +39,7 @@ def post_process(width, height, downscale_output, nflum, files):
 
     tokens = file.split('.')
     tokens[-2] += '_df'
-    tokens[-1] = 'jpg'
+    # tokens[-1] = 'jpg'
     out_file = '.'.join(tokens)
 
     nfl = nflum[:, :, n]
@@ -89,6 +89,11 @@ def main():
     wl = min(51, len(args.files))
     po = 3
 
+    if preview_in:
+        im = im.resize((width // 2, height // 2))
+        im.show()
+        return
+
     if(args.downscale != None):
         downscale = args.downscale
     if(args.downscale_output != None):
@@ -106,6 +111,12 @@ def main():
             raise RuntimeError("poly-order must be less than window length.")
         po = args.poly_order
 
+    if preview_lum:
+        ret = read_luma(width, height, downscale, blur, (0, args.files[0]))
+        im = Image.fromarray(ret * 255.0)
+        im.show()
+        return
+
     pool = Pool(cpu_count())
     func = partial(read_luma, width, height, downscale, blur)
     ret = pool.map(func, enumerate(args.files))
@@ -116,7 +127,7 @@ def main():
     nlum = np.swapaxes(nlum, 0, 2)
     nlum = np.swapaxes(nlum, 0, 1)
 
-    print("Applying Savitzky-Golay filter. Window length = %d" % wl)
+    print("Applying Savitzky-Golay filter. Window length = %d, Polyorder = %d" % (wl, po))
     nflum = scipy.signal.savgol_filter(nlum, wl, po)
     nflum = np.divide(nflum, nlum, out = np.zeros_like(nflum), where = nlum!=0)
 
