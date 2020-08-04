@@ -5,6 +5,10 @@ Timelapse Polisher analyses the luminance (and optionally hue and saturation) ch
 
 Here is an example before/after comparison: https://youtu.be/Wwqp80QfCsk
 
+Here is an example stat graph produced by the script:
+![Image of Yaktocat](https://raw.githubusercontent.com/kbrown73/timelapse-polisher/master/stat_graphs.png)
+
+
 ```
 usage: timelapse_polisher.py [-h] [-hue] [-sat] [-d DOWNSCALE] [-b BLUR]
                              [-wl WINDOW_LENGTH] [-po POLY_ORDER]
