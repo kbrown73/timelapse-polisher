@@ -3,37 +3,47 @@
 import os, argparse, shutil
 from functools import partial
 from multiprocessing import Pool, cpu_count
-from PIL import Image
+import cv2
 import numpy as np
 import scipy.signal
 from scipy.ndimage.filters import gaussian_filter
+import matplotlib.pyplot as plt
 
-def read_luma(width, height, downscale, blur, files):
+def read_hls(width, height, downscale, blur, files):
     n = files[0]
     file = files[1]
 
-    print("Reading: %s" % file)
-    im = Image.open(file)
-    im = im.convert('F')
-
+    print("Reading HLS from: %s" % file)
+    im = cv2.imread(file)
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2HLS).astype(float)
     if(downscale > 1):
-        im = im.resize((width // downscale, height // downscale))
+        im = cv2.resize(im, (width // downscale, height // downscale))
 
-    nim = np.asarray(im) / 255.0
+    im /= 255.0
+    im_h, im_l, im_s = cv2.split(im)
+
     if(blur > 0.0):
-        nim = gaussian_filter(nim, sigma = blur)
+        im_h = gaussian_filter(im_h, sigma = blur)
 
-    return nim
+    if(blur > 0.0):
+        im_s = gaussian_filter(im_s, sigma = blur)
 
-def post_process(width, height, downscale_output, nflum, out_path, files):
+    if(blur > 0.0):
+        im_l = gaussian_filter(im_l, sigma = blur)
+
+    return im_h, im_l, im_s
+
+def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview, files):
     n = files[0]
     file = files[1]
 
-    im = Image.open(file)
+    im = cv2.imread(file)
     if(downscale_output > 1):
         width = width // downscale_output
         height = height // downscale_output
-        im = im.resize((width, height))
+        im = cv2.resize(im, (width, height))
+
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2HLS).astype(float)
 
     file = os.path.basename(file)
     tokens = file.split('.')
@@ -42,28 +52,112 @@ def post_process(width, height, downscale_output, nflum, out_path, files):
     out_file = os.path.join(out_path, out_file)
 
     print("Post processing: %s" % out_file)
-    nfl = nflum[:, :, n]
-    imfl = Image.fromarray(nfl)
-    imfl = imfl.resize((width, height))
-    nfl = np.asarray(imfl)
+    im_h, im_l, im_s = cv2.split(im)
 
-    im_r, im_g, im_b = im.split()
-    nim_r = np.asarray(im_r)
-    nim_g = np.asarray(im_g)
-    nim_b = np.asarray(im_b)
-    nim_r = np.multiply(nim_r, nfl)
-    nim_g = np.multiply(nim_g, nfl)
-    nim_b = np.multiply(nim_b, nfl)
-    im_r = Image.fromarray(nim_r, 'F').convert('L')
-    im_g = Image.fromarray(nim_g, 'F').convert('L')
-    im_b = Image.fromarray(nim_b, 'F').convert('L')
-    im_output = Image.merge('RGB', (im_r, im_g, im_b))
+    print("    Luminance...")
+    nfl = fim_l[:, :, n]
+    nfl = cv2.resize(nfl, (width, height))
+    im_l = np.multiply(im_l, nfl)
+    m_l = im_l.mean() / 255.0
 
-    im_output.save(out_file, quality = 100)
+    nfh = None
+    m_h = None
+    if fim_h is not None:
+        print("    Hue...")
+        nfh = fim_h[:, :, n]
+        nfh = cv2.resize(nfh, (width, height))
+        im_h = np.multiply(im_h, nfh)
+        m_h = im_h.mean() / 255.0
+
+    nfs = None
+    m_s = None
+    if fim_s is not None:
+        print("    Saturation...")
+        nfs = fim_s[:, :, n]
+        nfs = cv2.resize(nfs, (width, height))
+        im_s = np.multiply(im_s, nfs)
+        m_s = im_s.mean() / 255.0
+
+    print("    Writing output...")
+    im_output = cv2.merge((im_h, im_l, im_s)).astype(np.uint8)
+    im_output = cv2.cvtColor(im_output, cv2.COLOR_HLS2BGR)
+    cv2.imwrite(out_file, im_output, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+
+    if preview is not None:
+        print("    Generating preview frame...")
+        factor = 1280.0 / width
+        im_output = cv2.resize(im_output, (1280, int(height * factor)))
+        # show(im_output, wait = True)
+        # raise RuntimeError('STOP')
+        preview.write(im_output)
+
+    return m_h, m_l, m_s
+
+def showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path):
+    im_l_mean = np.zeros(im_l.shape[2])
+    im_ls_mean = np.zeros(fim_l.shape[2])
+    for i in range(im_l.shape[2]):
+        mn = im_l[:, :, i].mean()
+        im_l_mean[i] = mn
+        mn = fim_l[:, :, i].mean()
+        im_ls_mean[i] = mn
+
+    im_h_mean = np.zeros_like(im_l_mean)
+    im_hs_mean = np.zeros_like(im_l_mean)
+    for i in range(im_h.shape[2]):
+        mn = im_h[:, :, i].mean()
+        im_h_mean[i] = mn
+        if fim_h is not None:
+            mn = fim_h[:, :, i].mean()
+            im_hs_mean[i] = mn
+
+    im_s_mean = np.zeros_like(im_l_mean)
+    im_ss_mean = np.zeros_like(im_l_mean)
+    for i in range(im_s.shape[2]):
+        mn = im_s[:, :, i].mean()
+        im_s_mean[i] = mn
+        if fim_s is not None:
+            mn = fim_s[:, :, i].mean()
+            im_ss_mean[i] = mn
+
+    means = (im_h_mean, im_l_mean, im_s_mean)
+    corrections = (im_hs_mean, im_ls_mean, im_ss_mean)
+    out_means = (ret[:, 0], ret[:, 1], ret[:, 2])
+
+    plt.rcParams.update({'font.size': 16})
+    labels = ['Hue', 'Luminance', 'Saturation']
+    figure, axes = plt.subplots(nrows = 2, ncols = 3)
+    figure.set_size_inches(20, 15)
+
+    for r, row in enumerate(axes):
+        for c, col in enumerate(row):
+            if r == 0:
+                col.set_title('%s Corrections' % labels[c])
+                col.set_ylabel('%s Scalar' % labels[c])
+                col.plot(corrections[c], 'g', label = 'Mean %s Correction' % labels[c], linewidth = 2)
+            else:
+                col.set_title('%s In/Out Means' % labels[c])
+                col.set_ylabel('Mean %s' % labels[c])
+                col.plot(means[c], 'r', label = 'Input Mean %s' % labels[c], linewidth = 2)
+                col.plot(out_means[c], 'b', label = 'Output Mean %s' % labels[c], linewidth = 2)
+                col.legend(loc = "upper left")
+                col.set_ylim(0.0, 1.0)
+
+    figure.tight_layout(pad = 2.0)
+    plt.savefig(os.path.join(out_path, 'stat_graphs.png'))
+    plt.show()
+
+def show(im, title = 'image', wait = False):
+    cv2.imshow(title, im)
+    if wait:
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("files", type = str, nargs = '+', help = "List of files e.g: *.jpg")
+    parser.add_argument("-hue", "--hue-smooth", action = 'store_true', help = "Smooth hues as well. Default = False")
+    parser.add_argument("-sat", "--saturation-smooth", action = 'store_true', help = "Smooth saturations as well. Default = False")
     parser.add_argument("-d", "--downscale", type = int, help = "Downscale input image by this factor before measuring luminances. Default = 8.")
     parser.add_argument("-b", "--blur", type = float, help = "Gaussian blur the luminance map by this factor. Default = 20.")
     parser.add_argument("-wl", "--window-length", type = int, help = "Window length for Savitzky-Golay filter. Default = 51 or number of input files whichever is smaller. This will be rounded down to nearest odd number.")
@@ -73,15 +167,17 @@ def main():
     parser.add_argument("-pl", "--preview-lum", action = 'store_true', help = "Preview the first luminance map and exit.")
     parser.add_argument("-of", "--out-folder", type = str, help = "Name of the output folder to be created under current working path. Default = \'df\'")
     parser.add_argument("-f", "--force", action = 'store_true', help = "With this flag the output folder will be deleted if it exists and a new one will be created.")
+    parser.add_argument("-sp", "--show-plot", action = 'store_true', help = "Show a plot of mean HLS for input and output images with correction graph.")
+    parser.add_argument("-p", "--preview", action = 'store_true', help = "Output and show a preview video.")
     args = parser.parse_args()
 
     if len(args.files) < 5:
         raise RuntimeError("Need at least 5 files to process.")
 
     args.files.sort()
-    im = Image.open(args.files[0])
-    width = im.width
-    height = im.height
+    im = cv2.imread(args.files[0])
+    width = im.shape[1]
+    height = im.shape[0]
 
     downscale = 8
     downscale_output = 1
@@ -92,8 +188,8 @@ def main():
     po = 3
 
     if preview_in:
-        im = im.resize((width // 2, height // 2))
-        im.show()
+        im = cv2.resize(im, (width // 2, height // 2))
+        show(im, wait = True)
         return
 
     if(args.downscale != None):
@@ -105,6 +201,7 @@ def main():
 
     if(args.window_length != None):
         wl = args.window_length
+        wl = min(wl, len(args.files))
     if wl % 2 == 0:
         wl -= 1
 
@@ -114,9 +211,10 @@ def main():
         po = args.poly_order
 
     if preview_lum:
-        ret = read_luma(width, height, downscale, blur, (0, args.files[0]))
-        im = Image.fromarray(ret * 255.0)
-        im.show()
+        im_h, im_l, im_s = read_hls(width, height, downscale, blur, (0, args.files[0]))
+        show(im_h, title = 'Hue')
+        show(im_l, title = 'Luminance')
+        show(im_s, title = 'Saturation', wait = True)
         return
 
     folder = 'df'
@@ -139,24 +237,81 @@ def main():
         raise RuntimeError("Could not create output path: %s" % out_path)
 
     pool = Pool(cpu_count())
-    func = partial(read_luma, width, height, downscale, blur)
+    func = partial(read_hls, width, height, downscale, blur)
     ret = pool.map(func, enumerate(args.files))
     pool.close()
     pool.join()
 
-    nlum = np.array(ret)
-    nlum = np.swapaxes(nlum, 0, 2)
-    nlum = np.swapaxes(nlum, 0, 1)
+    ret = np.array(ret)
+    ret = np.swapaxes(ret, 0, 1)
+    im_h = ret[0].swapaxes(0, 2).swapaxes(0, 1)
+    im_l = ret[1].swapaxes(0, 2).swapaxes(0, 1)
+    im_s = ret[2].swapaxes(0, 2).swapaxes(0, 1)
 
-    print("Applying Savitzky-Golay filter. Window length = %d, Polyorder = %d" % (wl, po))
-    nflum = scipy.signal.savgol_filter(nlum, wl, po)
-    nflum = np.divide(nflum, nlum, out = np.zeros_like(nflum), where = nlum!=0)
+    fim_h = None
+    if(args.hue_smooth):
+        print("Applying Savitzky-Golay filter (H). Window length = %d, Polyorder = %d" % (wl, po))
+        fim_h = scipy.signal.savgol_filter(im_h, wl, po)
+        fim_h = np.divide(fim_h, im_h, out = np.zeros_like(fim_h), where = im_h != 0)
+        fim_h = np.clip(fim_h, 0.0, 2.0)
 
-    pool = Pool(cpu_count())
-    func = partial(post_process, width, height, downscale_output, nflum, out_path)
-    pool.map(func, enumerate(args.files))
-    pool.close()
-    pool.join()
+    print("Applying Savitzky-Golay filter (L). Window length = %d, Polyorder = %d" % (wl, po))
+    fim_l = scipy.signal.savgol_filter(im_l, wl, po)
+    fim_l = np.divide(fim_l, im_l, out = np.zeros_like(fim_l), where = im_l != 0)
+    fim_l = np.clip(fim_l, 0.0, 2.0)
+
+    fim_s = None
+    if(args.saturation_smooth):
+        print("Applying Savitzky-Golay filter (S). Window length = %d, Polyorder = %d" % (wl, po))
+        fim_s = scipy.signal.savgol_filter(im_s, wl, po)
+        fim_s = np.divide(fim_s, im_s, out = np.zeros_like(fim_s), where = im_s != 0)
+        fim_s = np.clip(fim_s, 0.0, 2.0)
+
+    print("Staring post processing...")
+    # pool = Pool(cpu_count())
+    # func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, args.preview)
+    # ret = pool.map(func, enumerate(args.files))
+    # pool.close()
+    # pool.join()
+
+    preview_out = None
+    preview_file = None
+    if args.preview:
+        preview_file = os.path.join(out_path, 'preview.avi')
+
+        factor = 1280.0 / width
+        preview_out = cv2.VideoWriter(preview_file, cv2.VideoWriter_fourcc('X', '2', '6', '4'), 25, (1280, int(factor * height)))
+
+    ret = list()
+    for n, file in enumerate(args.files):
+        ret.append(post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview_out, (n, file)))
+
+    if args.preview:
+        preview_out.release()
+
+    ret = np.array(ret)
+
+    if args.show_plot:
+        showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path)
+
+    if args.preview:
+        print("Previewing %s (press \'q\' to quit)" % preview_file)
+        run = True
+        while run:
+            cap = cv2.VideoCapture(preview_file)
+            while True:
+                ret, frame = cap.read()
+
+                if ret == True:
+                    cv2.imshow('Preview (press \'q\' to quit)', frame)
+                else:
+                    cap.release()
+                    break
+
+                if cv2.waitKey(40) & 0xFF == ord('q'):
+                    cap.release()
+                    run = False
+                    break
 
 if __name__ == '__main__':
     main()
