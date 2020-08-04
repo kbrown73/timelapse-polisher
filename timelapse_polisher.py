@@ -51,7 +51,6 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
     print("Post processing: %s" % out_file)
     im_h, im_l, im_s = cv2.split(im)
 
-    print("    Luminance...")
     nfl = fim_l[:, :, n]
     nfl = cv2.resize(nfl, (width, height))
     im_l = np.multiply(im_l, nfl)
@@ -60,7 +59,6 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
     nfh = None
     m_h = None
     if fim_h is not None:
-        print("    Hue...")
         nfh = fim_h[:, :, n]
         nfh = cv2.resize(nfh, (width, height))
         im_h = np.multiply(im_h, nfh)
@@ -69,24 +67,21 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
     nfs = None
     m_s = None
     if fim_s is not None:
-        print("    Saturation...")
         nfs = fim_s[:, :, n]
         nfs = cv2.resize(nfs, (width, height))
         im_s = np.multiply(im_s, nfs)
         m_s = im_s.mean() / 255.0
 
-    print("    Writing output...")
     im_output = cv2.merge((im_h, im_l, im_s)).astype(np.uint8)
     im_output = cv2.cvtColor(im_output, cv2.COLOR_HLS2BGR)
     cv2.imwrite(out_file, im_output, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
 
-    if preview is not None:
-        print("    Generating preview frame...")
+    if preview:
         factor = 1280.0 / width
         im_output = cv2.resize(im_output, (1280, int(height * factor)))
-        preview.write(im_output)
-
-    return m_h, m_l, m_s
+        return m_h, m_l, m_s, im_output
+    else:
+        return m_h, m_l, m_s, None
 
 def showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path):
     im_l_mean = np.zeros(im_l.shape[2])
@@ -263,28 +258,22 @@ def main():
         fim_s = np.clip(fim_s, 0.0, 2.0)
 
     print("Staring post processing...")
-    preview_out = None
-    preview_file = None
-    if args.preview:
-        preview_file = os.path.join(out_path, 'preview.avi')
-
-        factor = 1280.0 / width
-        preview_out = cv2.VideoWriter(preview_file, cv2.VideoWriter_fourcc('X', '2', '6', '4'), 25, (1280, int(factor * height)))
-
-    ret = list()
-    for n, file in enumerate(args.files):
-        ret.append(post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview_out, (n, file)))
-
-    # pool = Pool(cpu_count())
-    # func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview_out)
-    # ret = pool.map(func, enumerate(args.files))
-    # pool.close()
-    # pool.join()
-
-    if args.preview:
-        preview_out.release()
+    pool = Pool(cpu_count())
+    func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, args.preview)
+    ret = pool.map(func, enumerate(args.files))
+    pool.close()
+    pool.join()
 
     ret = np.array(ret)
+
+    if args.preview:
+        preview_file = os.path.join(out_path, 'preview.avi')
+        factor = 1280.0 / width
+        preview_out = cv2.VideoWriter(preview_file, cv2.VideoWriter_fourcc('X', '2', '6', '4'), 25, (1280, int(factor * height)))
+        frames = ret[:, 3]
+        for frame in frames:
+            preview_out.write(frame)
+        preview_out.release()
 
     if args.show_plot:
         showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path)
