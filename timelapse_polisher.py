@@ -21,14 +21,11 @@ def read_hls(width, height, downscale, blur, files):
 
     im /= 255.0
     im_h, im_l, im_s = cv2.split(im)
+    im = None
 
     if(blur > 0.0):
         im_h = gaussian_filter(im_h, sigma = blur)
-
-    if(blur > 0.0):
         im_s = gaussian_filter(im_s, sigma = blur)
-
-    if(blur > 0.0):
         im_l = gaussian_filter(im_l, sigma = blur)
 
     return im_h, im_l, im_s
@@ -87,8 +84,6 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
         print("    Generating preview frame...")
         factor = 1280.0 / width
         im_output = cv2.resize(im_output, (1280, int(height * factor)))
-        # show(im_output, wait = True)
-        # raise RuntimeError('STOP')
         preview.write(im_output)
 
     return m_h, m_l, m_s
@@ -268,12 +263,6 @@ def main():
         fim_s = np.clip(fim_s, 0.0, 2.0)
 
     print("Staring post processing...")
-    # pool = Pool(cpu_count())
-    # func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, args.preview)
-    # ret = pool.map(func, enumerate(args.files))
-    # pool.close()
-    # pool.join()
-
     preview_out = None
     preview_file = None
     if args.preview:
@@ -285,6 +274,12 @@ def main():
     ret = list()
     for n, file in enumerate(args.files):
         ret.append(post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview_out, (n, file)))
+
+    # pool = Pool(cpu_count())
+    # func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview_out)
+    # ret = pool.map(func, enumerate(args.files))
+    # pool.close()
+    # pool.join()
 
     if args.preview:
         preview_out.release()
