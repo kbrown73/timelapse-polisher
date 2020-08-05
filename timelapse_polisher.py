@@ -174,7 +174,7 @@ def main():
     parser.add_argument("-po", "--poly-order", type = int, help = "Polynomial order for Savitzky-Golay filter. Default = 3. Must be less than window length.")
     parser.add_argument("-do", "--downscale-output", type = int, help = "Downscale the output images by this factor. Default = 1.")
     parser.add_argument("-pi", "--preview-in", action = 'store_true', help = "Preview the first input image (half size) and exit.")
-    parser.add_argument("-pl", "--preview-lum", action = 'store_true', help = "Preview the first luminance map and exit.")
+    parser.add_argument("-pm", "--preview-hls", action = 'store_true', help = "Preview the first HLS maps and exit.")
     parser.add_argument("-of", "--out-folder", type = str, help = "Name of the output folder to be created under current working path. Default = \'df\'")
     parser.add_argument("-f", "--force", action = 'store_true', help = "With this flag the output folder will be deleted if it exists and a new one will be created.")
     parser.add_argument("-sp", "--show-plot", action = 'store_true', help = "Show a plot of mean HLS for input and output images with correction graph.")
@@ -193,7 +193,7 @@ def main():
     downscale_output = 1
     blur = 20.0
     preview_in = args.preview_in
-    preview_lum = args.preview_lum
+    preview_hls = args.preview_hls
     wl = min(51, len(args.files))
     po = 3
 
@@ -220,7 +220,7 @@ def main():
             raise RuntimeError("poly-order must be less than window length.")
         po = args.poly_order
 
-    if preview_lum:
+    if preview_hls:
         im_h, im_l, im_s = read_hls(width, height, downscale, blur, (0, args.files[0]))
         show(im_h, title = 'Hue')
         show(im_l, title = 'Luminance')
