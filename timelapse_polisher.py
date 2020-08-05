@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import os, argparse, shutil
+import os, argparse, shutil, sys
 from functools import partial
 from multiprocessing import Pool, cpu_count
 import cv2
@@ -8,6 +8,10 @@ import numpy as np
 import scipy.signal
 from scipy.ndimage.filters import gaussian_filter
 import matplotlib.pyplot as plt
+
+fim_h = None
+fim_l = None
+fim_s = None
 
 def read_hls(width, height, downscale, blur, files):
     n = files[0]
@@ -30,7 +34,11 @@ def read_hls(width, height, downscale, blur, files):
 
     return im_h, im_l, im_s
 
-def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path, preview, files):
+def post_process(width, height, downscale_output, out_path, preview, files):
+    global fim_h
+    global fim_l
+    global fim_s
+
     n = files[0]
     file = files[1]
 
@@ -49,11 +57,13 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
     out_file = os.path.join(out_path, out_file)
 
     print("Post processing: %s" % out_file)
+
     im_h, im_l, im_s = cv2.split(im)
 
     nfl = fim_l[:, :, n]
     nfl = cv2.resize(nfl, (width, height))
     im_l = np.multiply(im_l, nfl)
+    im_l = np.clip(im_l, 0.0, 255.0)
     m_l = im_l.mean() / 255.0
 
     nfh = None
@@ -62,6 +72,7 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
         nfh = fim_h[:, :, n]
         nfh = cv2.resize(nfh, (width, height))
         im_h = np.multiply(im_h, nfh)
+        im_h = np.clip(im_h, 0.0, 255.0)
         m_h = im_h.mean() / 255.0
 
     nfs = None
@@ -70,6 +81,7 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
         nfs = fim_s[:, :, n]
         nfs = cv2.resize(nfs, (width, height))
         im_s = np.multiply(im_s, nfs)
+        im_s = np.clip(im_s, 0.0, 255.0)
         m_s = im_s.mean() / 255.0
 
     im_output = cv2.merge((im_h, im_l, im_s)).astype(np.uint8)
@@ -83,7 +95,11 @@ def post_process(width, height, downscale_output, fim_h, fim_l, fim_s, out_path,
     else:
         return m_h, m_l, m_s, None
 
-def showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path):
+def showplot(im_h, im_l, im_s, ret, out_path):
+    global fim_h
+    global fim_l
+    global fim_s
+
     im_l_mean = np.zeros(im_l.shape[2])
     im_ls_mean = np.zeros(fim_l.shape[2])
     for i in range(im_l.shape[2]):
@@ -144,6 +160,10 @@ def show(im, title = 'image', wait = False):
         cv2.destroyAllWindows()
 
 def main():
+    global fim_h
+    global fim_l
+    global fim_s
+
     parser = argparse.ArgumentParser()
     parser.add_argument("files", type = str, nargs = '+', help = "List of files e.g: *.jpg")
     parser.add_argument("-hue", "--hue-smooth", action = 'store_true', help = "Smooth hues as well. Default = False")
@@ -226,6 +246,11 @@ def main():
     except:
         raise RuntimeError("Could not create output path: %s" % out_path)
 
+    cmd = os.path.join(out_path, 'cmd.txt')
+    f = open(cmd, 'w')
+    f.write(' '.join(sys.argv))
+    f.close()
+
     pool = Pool(cpu_count())
     func = partial(read_hls, width, height, downscale, blur)
     ret = pool.map(func, enumerate(args.files))
@@ -238,7 +263,6 @@ def main():
     im_l = ret[1].swapaxes(0, 2).swapaxes(0, 1)
     im_s = ret[2].swapaxes(0, 2).swapaxes(0, 1)
 
-    fim_h = None
     if(args.hue_smooth):
         print("Applying Savitzky-Golay filter (H). Window length = %d, Polyorder = %d" % (wl, po))
         fim_h = scipy.signal.savgol_filter(im_h, wl, po)
@@ -250,7 +274,6 @@ def main():
     fim_l = np.divide(fim_l, im_l, out = np.zeros_like(fim_l), where = im_l != 0)
     fim_l = np.clip(fim_l, 0.0, 2.0)
 
-    fim_s = None
     if(args.saturation_smooth):
         print("Applying Savitzky-Golay filter (S). Window length = %d, Polyorder = %d" % (wl, po))
         fim_s = scipy.signal.savgol_filter(im_s, wl, po)
@@ -259,7 +282,7 @@ def main():
 
     print("Staring post processing...")
     pool = Pool(cpu_count())
-    func = partial(post_process, width, height, downscale_output, fim_h, fim_l, fim_s, out_path, args.preview)
+    func = partial(post_process, width, height, downscale_output, out_path, args.preview)
     ret = pool.map(func, enumerate(args.files))
     pool.close()
     pool.join()
@@ -268,6 +291,7 @@ def main():
 
     if args.preview:
         preview_file = os.path.join(out_path, 'preview.avi')
+        print("Writing preview video: %s" % preview_file)
         factor = 1280.0 / width
         preview_out = cv2.VideoWriter(preview_file, cv2.VideoWriter_fourcc('X', '2', '6', '4'), 25, (1280, int(factor * height)))
         frames = ret[:, 3]
@@ -276,7 +300,8 @@ def main():
         preview_out.release()
 
     if args.show_plot:
-        showplot(im_h, im_l, im_s, fim_h, fim_l, fim_s, ret, out_path)
+        print("Generating statistics graphs...")
+        showplot(im_h, im_l, im_s, ret, out_path)
 
     if args.preview:
         print("Previewing %s (press \'q\' to quit)" % preview_file)
