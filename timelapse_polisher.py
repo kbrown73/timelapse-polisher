@@ -308,16 +308,22 @@ def main():
         run = True
         while run:
             cap = cv2.VideoCapture(preview_file)
+            winname = 'Preview (press \'q\' to quit)'
             while True:
                 ret, frame = cap.read()
 
                 if ret == True:
-                    cv2.imshow('Preview (press \'q\' to quit)', frame)
+                    cv2.imshow(winname, frame)
                 else:
                     cap.release()
                     break
 
-                if cv2.waitKey(40) & 0xFF == ord('q'):
+                try:
+                    if cv2.waitKey(40) & 0xFF == ord('q') or cv2.getWindowProperty(winname, 0) < 0:
+                        cap.release()
+                        run = False
+                        break
+                except:
                     cap.release()
                     run = False
                     break
